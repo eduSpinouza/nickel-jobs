@@ -1,0 +1,50 @@
+{
+  "name": "nickel-jobs",
+  "version": "1.0.0",
+  "description": "Background Worker Jobs handler",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "test": "jest --config jestconfig.json",
+    "build": "tsc",
+    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.js\"",
+    "lint": "tslint -p tsconfig.json",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test && npm run lint",
+    "preversion": "npm run lint",
+    "version": "npm run format && git add -A src",
+    "postversion": "git push && git push --tags"
+  },
+  "files": [
+    "lib/**/*"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eduSpinouza/nickel-jobs.git"
+  },
+  "keywords": [
+    "job",
+    "background tasks"
+  ],
+  "author": "Eduardo Joel Espinoza San Martin",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/eduSpinouza/nickel-jobs/issues"
+  },
+  "homepage": "https://github.com/eduSpinouza/nickel-jobs#readme",
+  "devDependencies": {
+    "@types/jest": "^27.0.2",
+    "@types/mongodb": "^4.0.7",
+    "jest": "^27.3.1",
+    "prettier": "^2.4.1",
+    "ts-jest": "^27.0.7",
+    "tslint": "^6.1.3",
+    "tslint-config-prettier": "^1.18.0",
+    "typescript": "^4.4.4"
+  },
+  "dependencies": {
+    "@types/mongoose": "^5.11.97",
+    "mongo": "^0.1.0",
+    "mongoose": "^6.0.12"
+  }
+}
