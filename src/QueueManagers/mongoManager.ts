@@ -26,6 +26,7 @@ export class MongoManager implements QueueManager {
         this.connectionSucceeded = false;
     }
 
+
     connect(user?: string, pass?: string): Promise<boolean> {
 
         return new Promise(async (resolve, reject) => {
@@ -41,68 +42,49 @@ export class MongoManager implements QueueManager {
         });
     }
 
-    setupProcessJobsListener(jobType: string, callback: (nickelJob: NickelJob, data: string) => any): void {
+    setupProcessJobsListener(jobType: string, callback: (nickelJob: NickelJob, data: string) => any): Promise<void> {
 
-        if (MongoManager.client) {
+        return new Promise(async (resolve, reject) => {
 
-            const db: mongodb.Db = MongoManager.client.db(this.dbName);
-            const jobsCollection: mongodb.Collection = db.collection(this.collectionName);
+            if (MongoManager.client) {
+                const db: mongodb.Db = MongoManager.client.db(this.dbName);
+                const jobsCollection: mongodb.Collection = db.collection(this.collectionName);
 
-            const generalPipeline = [{
-                '$match': {
-                    'operationType': 'insert',
-                    'fullDocument.jobType': jobType
-                }
-            }];
+                let metadata = await this.upsertMetadata(jobType, false);
+                console.log('setupProcessJobsListener - metadata', metadata);
+                let assignedWorker = metadata.queueDataResult.registeredWorkers;
 
-            const changeStream = jobsCollection.watch(generalPipeline);
-            console.log(`Start to listening for jobs of type : ${jobType}`);
-            changeStream.on("change", async next => {
-                console.log(`Received Job of type ${jobType} with the following information: /t`, next);
+                const generalPipeline = [{
+                    '$match': {
+                        'operationType': 'insert',
+                        'fullDocument.jobType': jobType,
+                        'fullDocument.state': State.Queued,
+                        'fullDocument.assignedWorker': assignedWorker
+                    }
+                }];
 
-                console.log('Assigning worker number');
+                const changeStream = jobsCollection.watch(generalPipeline);
+                console.log(`Start to listening for jobs of type : ${jobType}`);
+                changeStream.on("change", async next => {
 
+                    console.log(`Received Job of type ${jobType} with the following information: /t`, next);
 
+                    let currentNickelJob = NickelJob.clone(next.fullDocument);
+                    currentNickelJob.state = State.Active;
+                    currentNickelJob.updatedAt = Date.now();
+                    currentNickelJob.connectionSucceeded = this.connectionSucceeded;
+                    currentNickelJob.queueManager = this;
 
+                    console.log('Updating Received Job : ', currentNickelJob);
 
-
-
-
-                let currentNickelJob = NickelJob.clone(next.fullDocument);
-                currentNickelJob.state = State.Active;
-                currentNickelJob.updatedAt = Date.now();
-                currentNickelJob.connectionSucceeded = this.connectionSucceeded;
-                currentNickelJob.queueManager = this;
-                //console.log('THIS', this);
-                //const currentNickelJob: NickelJob = next.fullDocument as NickelJob;
-                const result = await this.update(currentNickelJob);
-                console.log('After change to active state : ', result);
-                callback(currentNickelJob, currentNickelJob.data);
-            });
-
-
-
-
-
-
-
-            changeStream.on("change", async next => {
-                console.log("Received change from collection: /t", next);
-                let currentNickelJob = NickelJob.clone(next.fullDocument);
-                currentNickelJob.state = State.Active;
-                currentNickelJob.updatedAt = Date.now();
-                currentNickelJob.connectionSucceeded = this.connectionSucceeded;
-                currentNickelJob.queueManager = this;
-                //console.log('THIS', this);
-                //const currentNickelJob: NickelJob = next.fullDocument as NickelJob;
-                const result = await this.update(currentNickelJob);
-                console.log('After change to active state : ', result);
-                callback(currentNickelJob, currentNickelJob.data);
-            });
-
-
-        }
-
+                    const result = await this.update(currentNickelJob);
+                    console.log('After change to active state : ', result);
+                    callback(currentNickelJob, currentNickelJob.data);
+                });
+                
+                resolve();
+            }
+        });
     }
 
     setupOnDoneListener(jobType: string, callback: (nickelJob: NickelJob) => any): void {
@@ -138,11 +120,43 @@ export class MongoManager implements QueueManager {
         return new Promise(async (resolve, reject) => {
 
             try {
-                let nickelJobMetadata = new NickJobMetadata(nickelJob.jobType);
-                const metadataResult = await collections.metadata.insertOne(nickelJobMetadata);
-                console.log('Result from jobmetadata insertion', metadataResult);
                 const result = await collections.jobs?.insertOne(nickelJob);
                 resolve({ queueDataResult: result });
+            } catch (error) {
+                console.log('Error: ', error);
+                reject(null);
+            }
+        });
+    }
+
+    upsertMetadata(jobType: string, fromClient: boolean = true): Promise<NickelResult> {
+
+        return new Promise(async (resolve, reject) => {
+
+            try {                
+                console.log('Searching metadata with:', jobType);
+                const metadataResult = await collections.metadata?.findOne({ 'jobType': jobType });
+                console.log('From MongoDB metadataResult', metadataResult);
+                if (metadataResult) {
+                    if (!fromClient) {
+                        let updateResult = await collections.metadata?.updateOne(
+                            { _id: metadataResult._id },
+                            { $set: { 'registeredWorkers': metadataResult.registeredWorkers + 1 } }
+                        );
+                        console.log('From MongoDB updateResult', updateResult);
+                        resolve({ queueDataResult: { _id: metadataResult._id, 'jobType': jobType, 'registeredWorkers': metadataResult.registeredWorkers + 1 } });
+                    }
+
+                    resolve({ queueDataResult: metadataResult });
+                } else {
+                    let workersToInsert = 0;
+                    if (!fromClient) {
+                        workersToInsert = 1;
+                    }
+                    let insertResult = await collections.metadata?.insertOne({ 'jobType': jobType, 'registeredWorkers': workersToInsert });
+                    console.log('From MongoDB insertResult', insertResult);
+                    resolve({ queueDataResult: { _id: insertResult?.insertedId, 'jobType': jobType, 'registeredWorkers': workersToInsert } });
+                }
             } catch (error) {
                 console.log('Error: ', error);
                 reject(null);
@@ -170,7 +184,7 @@ export class MongoManager implements QueueManager {
             if (MongoManager.client) {
                 const db: mongodb.Db = MongoManager.client.db(this.dbName);
                 const jobsCollection: mongodb.Collection = db.collection(this.collectionName);
-                const jobsMetadaCollection : mongodb.Collection = db.collection(config.metadataCollectionName);
+                const jobsMetadaCollection: mongodb.Collection = db.collection(config.metadataCollectionName);
                 collections.jobs = jobsCollection;
                 collections.metadata = jobsMetadaCollection;
             }
@@ -179,4 +193,30 @@ export class MongoManager implements QueueManager {
 
         }
     }
+
+    cleanRegisteredWorkers(jobType: string): Promise<void> {
+
+        return new Promise(async (resolve, reject) => {
+
+            console.log('Cleaning Registered Worker');
+
+            if (MongoManager.client) {
+                const db: mongodb.Db = MongoManager.client.db(this.dbName);
+                const metadataCollection: mongodb.Collection = db.collection(config.metadataCollectionName);
+                let result: any = await metadataCollection.findOneAndUpdate(
+                    { 'jobType': jobType },
+                    { $inc: { 'registeredWorkers': -1 } },
+                    { returnDocument: mongodb.ReturnDocument.AFTER });
+
+                if (!result) {
+                    reject();
+                }
+
+                console.log('After update Job Metada on cleanRegisteredWorkers', result);
+
+                resolve();
+            }
+        });
+    }
+
 }

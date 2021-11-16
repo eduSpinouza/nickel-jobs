@@ -20,7 +20,7 @@ const MONGO_OPTIONS = {
 
 const config = {
     mongoOptions: MONGO_OPTIONS,
-    metadataCollectionName: 'jobMetada'
+    metadataCollectionName: 'jobMetadata'
 }
 
 export default config;

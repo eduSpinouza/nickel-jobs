@@ -51,7 +51,14 @@ export class NickelJob {
 
     public processJobs(jobType: string, callback: (nickelJob: NickelJob, data: string) => any) {
         console.log('Starting processJobs method');
-        this.queueManager?.setupProcessJobsListener(jobType, callback);
+
+        this.queueManager?.setupProcessJobsListener(jobType, callback);        
+
+        process.on('SIGINT', async () => {
+            console.log('Cleaning Workers just before exit');
+            await this.queueManager?.cleanRegisteredWorkers(jobType);
+            process.exit();
+        });
     }
 
     public async done() {
@@ -85,27 +92,6 @@ export class NickelJob {
         }
     }
 
-    private assignWorker(nickelJob: NickelJob) : number {
-
-        if (!nickelJob.options) {
-            return 1;
-        }
-
-        var maxWorkerCount = nickelJob.options.MaxWorkerCount;
-        
-        if (maxWorkerCount === 1) {
-            return 1;
-        }else {
-            if (this.lastAssignedWorker <= maxWorkerCount)  {
-                this.lastAssignedWorker++;
-                return this.lastAssignedWorker;
-            } else {
-                this.lastAssignedWorker = 1;
-                return this.
-            }
-        }
-    }
-
     public static clone(fullDocument: any): NickelJob {
         let clone = new NickelJob();
         clone.createAt = fullDocument?.createAt;
@@ -115,7 +101,8 @@ export class NickelJob {
         clone.state = fullDocument?.state;
         clone.dbName = fullDocument?.dbName;
         clone.collectionName = fullDocument?.collectionName;
-        clone.id = fullDocument?.id;
+        clone.id = fullDocument?._id;
+        clone.options = fullDocument?.options;
         return clone;
     }
 
