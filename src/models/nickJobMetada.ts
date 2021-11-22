@@ -1,4 +1,5 @@
 export class NickJobMetadata {
+    
     jobType: string;
     registeredWorkers: number
 

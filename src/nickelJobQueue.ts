@@ -1,6 +1,5 @@
-import * as mongodb from "mongodb";
-import { MongoHelper } from "./mongo.helper";
-import { NickelJob, State } from "./nickelJob";
+import { NickelJobModel } from "./models/nickelJobModel";
+import { State } from "./nickelJob";
 import { MongoManager } from "./QueueManagers/mongoManager";
 import { QueueManager } from "./QueueManagers/queueManager";
 
@@ -31,7 +30,7 @@ export class NickelJobQueue {
         }
     }
 
-    public async saveJob(nickelJob: NickelJob) {
+    public async saveJob(nickelJob: NickelJobModel) {
 
         const metadataResult = await this.queueManager.upsertMetadata(nickelJob.jobType, true);
         if (!metadataResult) {
@@ -41,8 +40,6 @@ export class NickelJobQueue {
 
         nickelJob.createAt = Date.now();
         nickelJob.state = State.Queued;
-        nickelJob.dbName = this.dbName;
-        nickelJob.collectionName = this.collectionName;
         nickelJob.options = nickelJob.options ? nickelJob.options : { MaxWorkerCount: 1 };
 
         console.log('After update Job Metada', metadataResult);
@@ -63,7 +60,7 @@ export class NickelJobQueue {
         }
     }
 
-    public onDone(jobType: string, callback: (nickelJob: NickelJob) => any) {
+    public onDone(jobType: string, callback: (nickelJob: NickelJobModel) => any) {
         console.log('Subscribe when Jobs are DONE');
 
         if (this.connectionSucceeded) {
@@ -71,8 +68,9 @@ export class NickelJobQueue {
         }
     }
 
-    private assignWorker(nickelJob: NickelJob): number {
+    private assignWorker(nickelJob: NickelJobModel): number {
 
+        // Using kind of "Round Robin assignation"
         console.log('assignWorker - nickelJob', nickelJob);
         if (!nickelJob.options) {
             return 1;

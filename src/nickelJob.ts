@@ -1,6 +1,6 @@
 import { QueueManager } from "./QueueManagers/queueManager";
 import { MongoManager } from "./QueueManagers/mongoManager";
-import { NickelJobOptions } from "./models/nickelJobOptions";
+import { NickelJobModel } from "./models/nickelJobModel";
 
 export enum State {
     Queued,
@@ -10,30 +10,19 @@ export enum State {
 }
 
 export class NickelJob {
-
-    id?: string;
-    jobType: string;
-    createAt?: number;
-    updatedAt?: number;
-    data?: string | any;
-    state?: State;
-    options?: NickelJobOptions;
-    assignedWorker: number;
-
+    
+    nickelJobModel: NickelJobModel;
 
     dbName: string;
     collectionName: string;
     queueManager: QueueManager | undefined;
     connectionSucceeded: boolean;
 
-
     constructor(jobType: string = 'nickelJob', data: string | any = '') {
-        this.jobType = jobType;
-        this.data = data;
+        this.nickelJobModel = new NickelJobModel(jobType, data);
         this.dbName = '';
         this.collectionName = '';
-        this.connectionSucceeded = false;
-        this.assignedWorker = 0;
+        this.connectionSucceeded = false;        
     }
 
     public async setConnection(url: string, dbName: string = 'meteor', collectionName: string = 'nickelJobQueue') {
@@ -41,18 +30,24 @@ export class NickelJob {
         this.dbName = dbName;
         this.collectionName = collectionName;
         console.log(`Trying to connecto to ${this.queueManager.queueIdentifier} with: `, url);
-        this.connectionSucceeded = await this.queueManager.connect(url);
-        //await MongoHelper.connect(url);
+        this.connectionSucceeded = await this.queueManager.connect(url);        
         if (this.connectionSucceeded) {
             this.queueManager.setup();
             console.log('Connection succeded');
         }
     }
 
-    public processJobs(jobType: string, callback: (nickelJob: NickelJob, data: string) => any) {
-        console.log('Starting processJobs method');
+    public async processJobs(jobType: string, callback: (nickelJob: NickelJob, data: string) => any) {
 
-        this.queueManager?.setupProcessJobsListener(jobType, callback);        
+        console.log('Starting to process Jobs');
+
+        await this.queueManager?.setupProcessJobsListener(jobType, false, callback);
+        
+        this.queueManager?.setupOnWorkerChangeListener(jobType, async () => {
+            console.log('Just before to call setupProcessJobsListener on WORKERCHANGE');
+            await this.queueManager?.cleanStream();           
+            await this.queueManager?.setupProcessJobsListener(jobType, true, callback);  
+        })
 
         process.on('SIGINT', async () => {
             console.log('Cleaning Workers just before exit');
@@ -63,17 +58,13 @@ export class NickelJob {
 
     public async done() {
 
-        console.log('NickelJob - done()', this.connectionSucceeded);
-        console.log('NickelJob - done()', this.queueManager);
-
         if (this.connectionSucceeded) {
-            const updatedNickelJob = this;
-            console.log('NickelJob - done() - updatedNickelJob', updatedNickelJob);
+            const updatedNickelJob = this.nickelJobModel;                        
             await this.updateJobStatus(updatedNickelJob, State.Done);
         }
     }
 
-    private async updateJobStatus(nickelJob: NickelJob, changeToState: State) {
+    private async updateJobStatus(nickelJob: NickelJobModel, changeToState: State) {
 
         if (this.queueManager?.connectionSucceeded) {
 
@@ -90,44 +81,5 @@ export class NickelJob {
                 throw new Error(`Error ocurred updating NickelJob to State: [${changeToState}]`);
             }
         }
-    }
-
-    public static clone(fullDocument: any): NickelJob {
-        let clone = new NickelJob();
-        clone.createAt = fullDocument?.createAt;
-        clone.updatedAt = fullDocument?.updatedAt;
-        clone.jobType = fullDocument?.jobType;
-        clone.data = fullDocument?.data;
-        clone.state = fullDocument?.state;
-        clone.dbName = fullDocument?.dbName;
-        clone.collectionName = fullDocument?.collectionName;
-        clone.id = fullDocument?._id;
-        clone.options = fullDocument?.options;
-        return clone;
-    }
-
-    // public onDone(jobType: string, callback: (nickelJob: NickelJob) => any) {
-    //     console.log('Subscribe when Jobs are done', MongoHelper.client);
-    //     if (MongoHelper.client) {            
-    //         const db: mongodb.Db = MongoHelper.client.db(this.dbName);
-    //         const jobsCollection: mongodb.Collection = db.collection(this.collectionName);
-    //         const pipeline = [ {
-    //             '$match': {
-    //                 'operationType': 'update',
-    //                 'fullDocument.jobType' : jobType,
-    //                 'fullDocument.state' : 2               
-    //             }
-    //         }];
-    //         const changeStream = jobsCollection.watch(pipeline);
-    //         console.log('Start to listening if there are some changes into the collection: ', this.collectionName);
-    //         changeStream.on("change", async next => {                
-    //             console.log("Received change from collection: /t", next);
-    //             let currentNickelJob = NickelJob.clone(next.fullDocument);
-    //             currentNickelJob.collectionName = this.collectionName;
-    //             currentNickelJob.dbName = this.dbName;
-    //             //const currentNickelJob: NickelJob = next.fullDocument as NickelJob;
-    //             callback(currentNickelJob);
-    //         });
-    //     }
-    // }
+    }    
 }
